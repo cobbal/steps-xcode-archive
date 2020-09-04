@@ -24,7 +24,7 @@ description: |-
 
    If the Step fails, check your code signing files first. Make sure they are the right type for your export method. For example, an `app-store` export method requires an App Store type provisioning profile and a Distribution certificate.
 
-   Check **Debug** for additional options to run the Step. The **Additional options for xcodebuild call** input allows you add any flags that the `xcodebuild` command supports.  
+   Check **Debug** for additional options to run the Step. The **Additional options for xcodebuild call** input allows you add any flags that the `xcodebuild` command supports.
 
    Make sure the **Scheme name** and **Configuration name** inputs contain values that actually exist in your Xcode project.
 
@@ -40,9 +40,9 @@ description: |-
    - [iOS Auto Provision](https://www.bitrise.io/integrations/steps/ios-auto-provision)
    - [Deploy to iTunesConnect](https://www.bitrise.io/integrations/steps/deploy-to-itunesconnect-deliver)
 
-website: https://github.com/bitrise-steplib/steps-xcode-archive
-source_code_url: https://github.com/bitrise-steplib/steps-xcode-archive
-support_url: https://github.com/bitrise-steplib/steps-xcode-archive/issues
+website: https://github.com/cobbal/steps-xcode-archive
+source_code_url: https://github.com/cobbal/steps-xcode-archive
+support_url: https://github.com/cobbal/steps-xcode-archive/issues
 project_type_tags:
   - ios
   - react-native
@@ -57,7 +57,7 @@ deps:
   - name: xcode
 toolkit:
   go:
-    package_name: github.com/bitrise-steplib/steps-xcode-archive
+    package_name: github.com/cobbal/steps-xcode-archive
 inputs:
   - project_path: $BITRISE_PROJECT_PATH
     opts:
@@ -142,7 +142,7 @@ inputs:
       title: "iCloud container environment"
       summary: ""
       description: |-
-        If the app is using CloudKit, this configures the "com.apple.developer.icloud-container-environment" entitlement.  
+        If the app is using CloudKit, this configures the "com.apple.developer.icloud-container-environment" entitlement.
         Available options vary depending on the type of provisioning profile used, but may include: Development and Production.
   - disable_index_while_building: "yes"
     opts:
@@ -152,7 +152,7 @@ inputs:
         Could make the build faster by adding `COMPILER_INDEX_STORE_ENABLE=NO` flag to the `xcodebuild` command which will disable the indexing during the build.
 
         Indexing is needed for
-        
+
         * Autocomplete
         * Ability to quickly jump to definition
         * Get class and method help by alt clicking.

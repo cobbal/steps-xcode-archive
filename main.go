@@ -26,7 +26,7 @@ import (
 	"github.com/bitrise-io/go-xcode/xcodebuild"
 	cache "github.com/bitrise-io/go-xcode/xcodecache"
 	"github.com/bitrise-io/go-xcode/xcpretty"
-	"github.com/bitrise-steplib/steps-xcode-archive/utils"
+	"github.com/cobbal/steps-xcode-archive/utils"
 	"github.com/kballard/go-shellquote"
 	"howett.net/plist"
 )
@@ -330,31 +330,31 @@ func main() {
 		}
 	}
 
+	//
+	// Open Xcode project
+	xcodeProj, scheme, configuration, err := utils.OpenArchivableProject(absProjectPath, cfg.Scheme, cfg.Configuration)
+	if err != nil {
+		fail("Failed to open project: %s: %s", absProjectPath, err)
+	}
+
+	platform, err := utils.BuildableTargetPlatform(xcodeProj, scheme, configuration, utils.XcodeBuild{})
+	if err != nil {
+		fail("Failed to read project platform: %s: %s", absProjectPath, err)
+	}
+
+	mainTarget, err := archivableApplicationTarget(xcodeProj, scheme, configuration)
+	if err != nil {
+		fail("Failed to read main application target: %s", absProjectPath, err)
+	}
+	if mainTarget.ProductType == appClipProductType {
+		log.Errorf("Selected scheme: '%s' targets an App Clip target (%s),", cfg.Scheme, mainTarget.Name)
+		log.Errorf("'Xcode Archive & Export for iOS' step is intended to archive the project using a scheme targeting an Application target.")
+		log.Errorf("Please select a scheme targeting an Application target to archive and export the main Application")
+		log.Errorf("and use 'Export iOS and tvOS Xcode archive' step to export an App Clip.")
+		os.Exit(1)
+	}
+
 	if cfg.ExistingArchivePath == "" {
-		//
-		// Open Xcode project
-		xcodeProj, scheme, configuration, err := utils.OpenArchivableProject(absProjectPath, cfg.Scheme, cfg.Configuration)
-		if err != nil {
-			fail("Failed to open project: %s: %s", absProjectPath, err)
-		}
-
-		platform, err := utils.BuildableTargetPlatform(xcodeProj, scheme, configuration, utils.XcodeBuild{})
-		if err != nil {
-			fail("Failed to read project platform: %s: %s", absProjectPath, err)
-		}
-
-		mainTarget, err := archivableApplicationTarget(xcodeProj, scheme, configuration)
-		if err != nil {
-			fail("Failed to read main application target: %s", absProjectPath, err)
-		}
-		if mainTarget.ProductType == appClipProductType {
-			log.Errorf("Selected scheme: '%s' targets an App Clip target (%s),", cfg.Scheme, mainTarget.Name)
-			log.Errorf("'Xcode Archive & Export for iOS' step is intended to archive the project using a scheme targeting an Application target.")
-			log.Errorf("Please select a scheme targeting an Application target to archive and export the main Application")
-			log.Errorf("and use 'Export iOS and tvOS Xcode archive' step to export an App Clip.")
-			os.Exit(1)
-		}
-
 		//
 		// Create the Archive with Xcode Command Line tools
 		log.Infof("Create the Archive ...")
