@@ -70,6 +70,7 @@ type configs struct {
 	IsCleanBuild              bool   `env:"is_clean_build,opt[yes,no]"`
 	XcodebuildOptions         string `env:"xcodebuild_options"`
 	DisableIndexWhileBuilding bool   `env:"disable_index_while_building,opt[yes,no]"`
+	ExistingArchivePath       string `env:"existing_archive_path,dir"`
 
 	ExportAllDsyms bool   `env:"export_all_dsyms,opt[yes,no]"`
 	ArtifactName   string `env:"artifact_name"`
@@ -289,11 +290,14 @@ func main() {
 	}
 
 	// output files
-	tmpArchiveDir, err := pathutil.NormalizedOSTempDirPath("__archive__")
-	if err != nil {
-		fail("Failed to create temp dir for archives, error: %s", err)
+	tmpArchivePath := cfg.ExistingArchivePath
+	if cfg.ExistingArchivePath == "" {
+		tmpArchiveDir, err := pathutil.NormalizedOSTempDirPath("__archive__")
+		if err != nil {
+			fail("Failed to create temp dir for archives, error: %s", err)
+		}
+		tmpArchivePath = filepath.Join(tmpArchiveDir, cfg.ArtifactName+".xcarchive")
 	}
-	tmpArchivePath := filepath.Join(tmpArchiveDir, cfg.ArtifactName+".xcarchive")
 
 	appPath := filepath.Join(cfg.OutputDir, cfg.ArtifactName+".app")
 	ipaPath := filepath.Join(cfg.OutputDir, cfg.ArtifactName+".ipa")
@@ -326,120 +330,121 @@ func main() {
 		}
 	}
 
-	//
-	// Open Xcode project
-	xcodeProj, scheme, configuration, err := utils.OpenArchivableProject(absProjectPath, cfg.Scheme, cfg.Configuration)
-	if err != nil {
-		fail("Failed to open project: %s: %s", absProjectPath, err)
-	}
-
-	platform, err := utils.BuildableTargetPlatform(xcodeProj, scheme, configuration, utils.XcodeBuild{})
-	if err != nil {
-		fail("Failed to read project platform: %s: %s", absProjectPath, err)
-	}
-
-	mainTarget, err := archivableApplicationTarget(xcodeProj, scheme, configuration)
-	if err != nil {
-		fail("Failed to read main application target: %s", absProjectPath, err)
-	}
-	if mainTarget.ProductType == appClipProductType {
-		log.Errorf("Selected scheme: '%s' targets an App Clip target (%s),", cfg.Scheme, mainTarget.Name)
-		log.Errorf("'Xcode Archive & Export for iOS' step is intended to archive the project using a scheme targeting an Application target.")
-		log.Errorf("Please select a scheme targeting an Application target to archive and export the main Application")
-		log.Errorf("and use 'Export iOS and tvOS Xcode archive' step to export an App Clip.")
-		os.Exit(1)
-	}
-
-	//
-	// Create the Archive with Xcode Command Line tools
-	log.Infof("Create the Archive ...")
-	fmt.Println()
-
-	isWorkspace := false
-	ext := filepath.Ext(absProjectPath)
-	if ext == ".xcodeproj" {
-		isWorkspace = false
-	} else if ext == ".xcworkspace" {
-		isWorkspace = true
-	} else {
-		fail("Project file extension should be .xcodeproj or .xcworkspace, but got: %s", ext)
-	}
-
-	archiveCmd := xcodebuild.NewCommandBuilder(absProjectPath, isWorkspace, xcodebuild.ArchiveAction)
-	archiveCmd.SetScheme(cfg.Scheme)
-	archiveCmd.SetConfiguration(cfg.Configuration)
-
-	if cfg.ForceTeamID != "" {
-		log.Printf("Forcing Development Team: %s", cfg.ForceTeamID)
-		archiveCmd.SetForceDevelopmentTeam(cfg.ForceTeamID)
-	}
-	if cfg.ForceProvisioningProfileSpecifier != "" {
-		log.Printf("Forcing Provisioning Profile Specifier: %s", cfg.ForceProvisioningProfileSpecifier)
-		archiveCmd.SetForceProvisioningProfileSpecifier(cfg.ForceProvisioningProfileSpecifier)
-	}
-	if cfg.ForceProvisioningProfile != "" {
-		log.Printf("Forcing Provisioning Profile: %s", cfg.ForceProvisioningProfile)
-		archiveCmd.SetForceProvisioningProfile(cfg.ForceProvisioningProfile)
-	}
-	if cfg.ForceCodeSignIdentity != "" {
-		log.Printf("Forcing Code Signing Identity: %s", cfg.ForceCodeSignIdentity)
-		archiveCmd.SetForceCodeSignIdentity(cfg.ForceCodeSignIdentity)
-	}
-
-	if cfg.IsCleanBuild {
-		archiveCmd.SetCustomBuildAction("clean")
-	}
-
-	archiveCmd.SetDisableIndexWhileBuilding(cfg.DisableIndexWhileBuilding)
-	archiveCmd.SetArchivePath(tmpArchivePath)
-
-	destination := "generic/platform=" + string(platform)
-	options := []string{"-destination", destination}
-	if cfg.XcodebuildOptions != "" {
-		userOptions, err := shellquote.Split(cfg.XcodebuildOptions)
+	if cfg.ExistingArchivePath == "" {
+		//
+		// Open Xcode project
+		xcodeProj, scheme, configuration, err := utils.OpenArchivableProject(absProjectPath, cfg.Scheme, cfg.Configuration)
 		if err != nil {
-			fail("Failed to shell split XcodebuildOptions (%s), error: %s", cfg.XcodebuildOptions)
+			fail("Failed to open project: %s: %s", absProjectPath, err)
 		}
 
-		if sliceutil.IsStringInSlice("-destination", userOptions) {
-			options = userOptions
-		} else {
-			options = append(options, userOptions...)
-		}
-	}
-	archiveCmd.SetCustomOptions(options)
-
-	var swiftPackagesPath string
-	if xcodeMajorVersion >= 11 {
-		var err error
-		if swiftPackagesPath, err = cache.SwiftPackagesPath(absProjectPath); err != nil {
-			fail("Failed to get Swift Packages path, error: %s", err)
-		}
-	}
-
-	rawXcodebuildOut, err := runArchiveCommandWithRetry(archiveCmd, outputTool == "xcpretty", swiftPackagesPath)
-	if err != nil || outputTool == "xcodebuild" {
-		const lastLinesMsg = "\nLast lines of the Xcode's build log:"
+		platform, err := utils.BuildableTargetPlatform(xcodeProj, scheme, configuration, utils.XcodeBuild{})
 		if err != nil {
-			log.Infof(colorstring.Red(lastLinesMsg))
-		} else {
-			log.Infof(lastLinesMsg)
+			fail("Failed to read project platform: %s: %s", absProjectPath, err)
 		}
-		fmt.Println(stringutil.LastNLines(rawXcodebuildOut, 20))
 
-		if err := utils.ExportOutputFileContent(rawXcodebuildOut, rawXcodebuildOutputLogPath, bitriseXcodeRawResultTextEnvKey); err != nil {
-			log.Warnf("Failed to export %s, error: %s", bitriseXcodeRawResultTextEnvKey, err)
-		} else {
-			log.Infof(colorstring.Magenta(fmt.Sprintf(`You can find the last couple of lines of Xcode's build log above, but the full log is also available in the raw-xcodebuild-output.log
-The log file is stored in $BITRISE_DEPLOY_DIR, and its full path is available in the $BITRISE_XCODE_RAW_RESULT_TEXT_PATH environment variable
-(value: %s)`, rawXcodebuildOutputLogPath)))
+		mainTarget, err := archivableApplicationTarget(xcodeProj, scheme, configuration)
+		if err != nil {
+			fail("Failed to read main application target: %s", absProjectPath, err)
 		}
-	}
-	if err != nil {
-		fail("Archive failed, error: %s", err)
-	}
+		if mainTarget.ProductType == appClipProductType {
+			log.Errorf("Selected scheme: '%s' targets an App Clip target (%s),", cfg.Scheme, mainTarget.Name)
+			log.Errorf("'Xcode Archive & Export for iOS' step is intended to archive the project using a scheme targeting an Application target.")
+			log.Errorf("Please select a scheme targeting an Application target to archive and export the main Application")
+			log.Errorf("and use 'Export iOS and tvOS Xcode archive' step to export an App Clip.")
+			os.Exit(1)
+		}
 
-	fmt.Println()
+		//
+		// Create the Archive with Xcode Command Line tools
+		log.Infof("Create the Archive ...")
+		fmt.Println()
+
+		isWorkspace := false
+		ext := filepath.Ext(absProjectPath)
+		if ext == ".xcodeproj" {
+			isWorkspace = false
+		} else if ext == ".xcworkspace" {
+			isWorkspace = true
+		} else {
+			fail("Project file extension should be .xcodeproj or .xcworkspace, but got: %s", ext)
+		}
+
+		archiveCmd := xcodebuild.NewCommandBuilder(absProjectPath, isWorkspace, xcodebuild.ArchiveAction)
+		archiveCmd.SetScheme(cfg.Scheme)
+		archiveCmd.SetConfiguration(cfg.Configuration)
+
+		if cfg.ForceTeamID != "" {
+			log.Printf("Forcing Development Team: %s", cfg.ForceTeamID)
+			archiveCmd.SetForceDevelopmentTeam(cfg.ForceTeamID)
+		}
+		if cfg.ForceProvisioningProfileSpecifier != "" {
+			log.Printf("Forcing Provisioning Profile Specifier: %s", cfg.ForceProvisioningProfileSpecifier)
+			archiveCmd.SetForceProvisioningProfileSpecifier(cfg.ForceProvisioningProfileSpecifier)
+		}
+		if cfg.ForceProvisioningProfile != "" {
+			log.Printf("Forcing Provisioning Profile: %s", cfg.ForceProvisioningProfile)
+			archiveCmd.SetForceProvisioningProfile(cfg.ForceProvisioningProfile)
+		}
+		if cfg.ForceCodeSignIdentity != "" {
+			log.Printf("Forcing Code Signing Identity: %s", cfg.ForceCodeSignIdentity)
+			archiveCmd.SetForceCodeSignIdentity(cfg.ForceCodeSignIdentity)
+		}
+
+		if cfg.IsCleanBuild {
+			archiveCmd.SetCustomBuildAction("clean")
+		}
+
+		archiveCmd.SetDisableIndexWhileBuilding(cfg.DisableIndexWhileBuilding)
+		archiveCmd.SetArchivePath(tmpArchivePath)
+
+		destination := "generic/platform=" + string(platform)
+		options := []string{"-destination", destination}
+		if cfg.XcodebuildOptions != "" {
+			userOptions, err := shellquote.Split(cfg.XcodebuildOptions)
+			if err != nil {
+				fail("Failed to shell split XcodebuildOptions (%s), error: %s", cfg.XcodebuildOptions)
+			}
+
+			if sliceutil.IsStringInSlice("-destination", userOptions) {
+				options = userOptions
+			} else {
+				options = append(options, userOptions...)
+			}
+		}
+		archiveCmd.SetCustomOptions(options)
+
+		var swiftPackagesPath string
+		if xcodeMajorVersion >= 11 {
+			var err error
+			if swiftPackagesPath, err = cache.SwiftPackagesPath(absProjectPath); err != nil {
+				fail("Failed to get Swift Packages path, error: %s", err)
+			}
+		}
+
+		rawXcodebuildOut, err := runArchiveCommandWithRetry(archiveCmd, outputTool == "xcpretty", swiftPackagesPath)
+		if err != nil || outputTool == "xcodebuild" {
+			const lastLinesMsg = "\nLast lines of the Xcode's build log:"
+			if err != nil {
+				log.Infof(colorstring.Red(lastLinesMsg))
+			} else {
+				log.Infof(lastLinesMsg)
+			}
+			fmt.Println(stringutil.LastNLines(rawXcodebuildOut, 20))
+
+			if err := utils.ExportOutputFileContent(rawXcodebuildOut, rawXcodebuildOutputLogPath, bitriseXcodeRawResultTextEnvKey); err != nil {
+				log.Warnf("Failed to export %s, error: %s", bitriseXcodeRawResultTextEnvKey, err)
+			} else {
+				log.Infof(colorstring.Magenta(fmt.Sprintf(`You can find the last couple of lines of Xcode's build log above, but the full log is also available in the raw-xcodebuild-output.log
+	The log file is stored in $BITRISE_DEPLOY_DIR, and its full path is available in the $BITRISE_XCODE_RAW_RESULT_TEXT_PATH environment variable
+	(value: %s)`, rawXcodebuildOutputLogPath)))
+			}
+		}
+		if err != nil {
+			fail("Archive failed, error: %s", err)
+		}
+		fmt.Println()
+	}
 
 	// Ensure xcarchive exists
 	if exist, err := pathutil.IsPathExists(tmpArchivePath); err != nil {

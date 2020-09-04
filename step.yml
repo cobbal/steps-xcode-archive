@@ -176,6 +176,11 @@ inputs:
       - "none"
       - "swift_packages"
       is_required: true
+  - existing_archive_path:
+    opts:
+      title: "Existing archive path"
+      description: |-
+        Specifies which archive to export from. If unset, `xcodebuild archive` will be run.
   - force_team_id:
     opts:
       category: Force Build Settings
